@@ -1,0 +1,154 @@
+---
+title: "MLWIC2_processing_occupancy"
+author: "Brandon Mayer"
+date: "5/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MLWIC2)
+```
+
+
+For starters, we'll examine how well the available empty_animal model can sort out false captures (False Positive "FP") or empty photos
+*note: The absolute paths are used to locate the necessary files. 
+
+- The`classify` function has 5 static parameters.
+<br>
+    - `path_prefix`  
+        - This is the absolute path to the total resized images reside. In the Walkthrough markdown, we consolidated all of the photos to a single folder. 
+        - Because we are examining whether the photo is empty or not, the number of individuals in each photo is unnecessary.
+<br>       
+    - `data_info`
+        - This is the location of the .csv containing information about the images. 
+        - In the Walkthrough Markdown we renamed and structured the .CSV the have no headers.
+          - The first column contained the basename of each photo.
+          - The second column includes a value for the photos since the same format is used in training. The walkthrough, autofills to 0 a value isnt included.
+        - *This file should be named image_labels.csv and it should be located in the MLWIC_helper_files folder.* 
+<br>
+    - `model_dir`
+        - This is where you stored the *MLWIC_helper_files* folder  .
+<br>   
+    - `python_loc`
+        - The location of Python on your computer.
+        - *Note: You MUST have a slash ("/") at the end of the path!!!**
+```{r}
+# add the path to Anaconda her as well. 
+condapath <- ""
+```
+        
+<br>
+    - `os`
+        - Default is set to "Mac". Change to 'Windows'if necessary.
+
+- Additionally includes 3 changeable parameters.
+<br>
+    - `log_dir`
+        - This allows the user to choose the model they with to use on their photos.
+        - There are two base models available from the *MLWIC_helper_files* we downloaded in the previous markdown file. 
+
+            1. empty_animal
+            2. Species_animal
+<br>
+    - `output_name`
+        - model_predictions.txt are automatically transformed into an easy to read .csv.
+        - This defaults to *MLWIC2_output*, but can be adjusted so it isnt overwritten. 
+ <br>
+    - `num_classes`
+        - This represents the number of available scores the machine will assign the the photo. 
+        - Occupancy is binary so only two scores (0 and 1) are used. 
+        - This will consist of the number of species in youre examining for when scoring for species. 
+
+# Classifying
+```{r}
+
+### Example using absolute paths
+# classify(
+#   path_prefix = "C:/Users/brand/Documents/MLWIC/MLWIC_unmediated",
+#   data_info = "C:/Users/brand/Documents/MLWIC/MLWIC_unmediated/MLWIC2_helper_files/image_labels.csv",
+#   model_dir = "C:/Users/brand/Documents/MLWIC/MLWIC_unmediated/MLWIC2_helper_files",
+#   python_loc = "C:/Users/brand/Anaconda3/", # remember to include the last slash
+#   log_dir = "empty_animal",
+#   save_predictions = "model_predictions2.txt", 
+#   os = 'Windows',
+#   num_classes = 2
+#   )
+
+classify(
+ path_prefix = paste0(getwd(), "/images"), # absolute path to location of the images on your computer. Should be in the immediate directory
+  data_info = paste0(getwd(), "/MLWIC2_helper_files/image_labels.csv"), #
+  model_dir = paste0(getwd(), "/MLWIC2_helper_files"),
+  python_loc = condapath,
+  log_dir = "empty_animal",
+  save_predictions = "model_predictions.txt", # raw form
+  output_name = "MLWIC2_output.csv",
+  os = 'Windows',
+  num_classes = 2
+)
+  
+```
+
+# Testing for the empty_animal model for Recall 
+## Deciding on on threshold is a balancing game between precision and recall. By increasing one we see a decrease in the other. For our sorting needs, we're interested in capturing all of the occupied photos so we're aiming to reduce False Negatives. This will result in a higher precision, but extra photos are a small cost for increased data. 
+
+```{r}
+output <- read.csv(paste(getwd(),"/MLWIC2_helper_files/MLWIC2_output.csv", sep =""))
+
+# basic accuracy comparing correct answers to the results
+correct_predictions <- output$answer==output$guess1
+base_accuracy <- if (correct_predictions==TRUE){sum(correct_predictions)}/length(correct_predictions)
+
+# binomial check
+TP <- sum(output$answer == 1 & output$guess1 == 1)
+TN <- sum(output$answer == 0 & output$guess1 == 0)
+FP <- sum(output$answer == 1 & !output$guess1 == 1)
+FN <- sum(output$answer == 0 & !output$guess1 == 0)
+
+accuracy <- (TP+TN)/(TP+TN+FP+FN) 
+
+# What proportion of positive identifications was actually correct?
+Precision <- TP/(TP+FP)
+
+# What proportion of actual positives was identified correctly?
+Recall <- TP/ (TP+FN)
+
+# in our case maxing out Precision is the best bet. Better to have all of the occupied photos and sort through extras than to miss out on occupied photos.
+```
+
+This will be the bread and butter of how you approach training. Training under new parameters, and testing the newly classified photos will help you maximize recall. 
+
+# Training with your own results. 
+
+The current settings are set to retrain the empty_animal model. This focuses on occupancy and only has 2 classes
+
+*Note: The train function has extra parameters that allow you to select variious detail of how you want to train the new model. 
+
+```{r}
+train(  path_prefix = paste0(getwd(), "/images"), # absolute path to location of the images on your computer
+  data_info = paste0(getwd(), "/MLWIC2_helper_files/image_labels.csv"), # csv with file names for each photo. See details
+  model_dir = paste0(getwd(), "/MLWIC2_helper_files"),
+  python_loc = condapath,
+  os="Windows",
+  num_gpus = 2,
+  num_classes = 2, # number of classes in model
+  delimiter = ",", # this will be , for a csv.
+  architecture = "resnet",
+  depth = "18",
+  batch_size = 128,
+  log_dir = "Your_unique_model",
+  log_dir_train = "MLWIC2_train_output",
+  retrain = TRUE,
+  retrain_from = "empty_animal",
+  num_epochs = 5, # Number of rounds of
+  randomize = TRUE,
+  max_to_keep = 2,
+  print_cmd = FALSE,
+  shiny=FALSE
+)
+```
+
+# Included here will be a step by step breakdown of how to approach fine-tuning the model. 
+
+# A Third script will follow tackling species identification. 
+

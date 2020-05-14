@@ -1,0 +1,248 @@
+---
+title: "MLWIC2_Walkthrough"
+author: "Brandon Mayer"
+date: "`r format(Sys.Date(), '%b %d, %Y')`"
+output: 
+  html_document:
+  toc: true
+  toc_float: true
+  toc_collapsed: true
+toc_depth: 3
+number_sections: true
+theme: lumen
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*This document is meant to a last attempt endeavor to the provided assistance in navigating[`MLWIC2`](https://github.com/mikeyEcology/MLWIC2) while using [`MLWIC_examples`](https://github.com/mikeyEcology/MLWIC_examples). This resource should run in parrallel with Nova-Scotia's MLWIC_Windows_Set_up.Rmd.* 
+
+
+## Getting started
+This walkthrough attempts to steamline the process of installing a forked version of Machine Learning for Image Classification 2 (MLWIC2) by restricting activity to two R markdown files. 
+
+The first one includes:
+
+1. Collecting all the necessary resources 
+ - Setup of python
+ - Helper_files
+ - MLWIC2
+2. Organizing files in the proper locations 
+ - Images
+ - image_labels.csv
+ 
+Second includes:
+
+1. "Classifying" based on models stored in Helper_files
+2. "Training" new model from images 
+3. Converting Output if presicion is high enough  
+ - Assigning each photo a label based on a decided accuracy threshold
+ - Setting up system to check more ambiguous photos
+ 
+# Setup Python
+
+Installing python will be the only step that requires you to leave this markdown file. Clicking on the link provided below will begin the download.
+Install the .exe in downloads and run when complete.
+>[Anaconda3-2020.02-Windows-x86_64.exe  466.3M](https://repo.anaconda.com/archive/Anaconda3-2020.02-Windows-x86_64.exe)
+
+Install Anaconda for your user only and follow the recommended settings. 
+
+### Just in case... enter the Anaconda absolute path here -> 
+You'll need the above path when running setup, classifying, and training functions from MLWIC2.
+```{r}
+condapath <- "" # put the path here as well. We'll streamline the process for later
+```
+
+Once installed enter Anaconda navigator and access the **Environments** tab. 
+Under base(root), you'll need to install 3 vital packages. changes the **Installed** drop down to **Not Installed** and search for the packages listed below. If version is included, **right click** the square next to the package name an select **Mark for specific version installation**
+
+1. `setuptools`
+2. `tensorflow`: veresion 1.14
+3. `cudnn`
+
+# Download the Helper_files folder.
+Will require googledrive to verify the user before download.
+```{r}
+library(googledrive)
+
+dl <- drive_download(as_id("1M1pl9edaaIZqcQkCndLcvEcbOOkSrTQB"), path = temp, overwrite = TRUE)
+out <- unzip(temp, exdir = tempdir())
+x <- getwd()
+y <- paste(gsub(basename(dl$local_path),"", dl$local_path),"MLWIC2_helper_files",sep = "")
+cat(y,'\n')
+file.copy(y,x, recursive = TRUE)
+
+```
+
+# Organize photos
+Photo management is critical to any classification project. Where and how photos are stored is an important first step, but this becomes challenging when photos arent organized by name and location. The first step to developing a seemless data management plan is creating unique names for each file. the **Bulk renamer tool** is a simple and quick tool that can seemlessly rename all of your photos by a controled structure. Before we get into that, lets get the tool installed on your computer.
+
+#### Install Renamer tool:  Do only once!
+```{r}
+user<- sub('^([^/]*/[^/]*/[^/]*).*', "\\1", getwd()) #give you the base path for your user
+
+BRC_folder <- paste(user,"Documents/Tools/BRC_Unicode_64",sep = "/") # the locaiton for the tool has been decided for you
+temp <- tempfile(fileext = ".zip")
+
+download.file("https://www.bulkrenameutility.co.uk/Downloads/BRC_Unicode_64.zip",temp)
+dir.create(BRC_folder)
+out <- unzip(temp, exdir = BRC_folder)
+out[4]
+```
+Once you have the path from out[4] accessible copy this directly below so you have access to it for when you have more photos to rename.
+
+Note the bulk rename tool's absolute path here -> 
+
+You can comment out this section and never look at it again. 
+
+#### Run bulk renaming tool on photos
+```{r}
+# Enter the absolute path to Bulkrename tool
+BRC_location <- ""
+```
+
+Now we can readily use the tool to rename folders. This should be done immediately after loading your photos from SD cards into your primary storag storage location. The current setup will use the photos' metadata to rename the time last datetime modified, aka when the camera trap took the photo.  
+*note: This only works if you haven't copied the photo. As soon as you copy the photo this changes the last modified datetime. Check the the metadata for the photos your interested in changing first and verify the date is corrent. Otherwise note the absolute path and enter it below.
+
+```{r}
+
+# Absolute path to photo folder youre interested in renaming  
+photo_folder_path <-""
+BRC_exe <- gsub("/","\\", BRC_location, fixed = TRUE)
+cat(stringr::str_replace_all(photo_folder_path, "/", "\\\\"), sep = "\n")
+DIR <- paste0("/DIR:","'", photo_folder_path,"'") 
+nf <- '/NOFOLDERS' # dont change folder names
+rec <- '/RECURSIVE' # access all photos regardless of whether theyre in a different folder
+rmv <-'/REMOVENAME' # Start renaming
+date <- '/APPENDDATE:M:P::-:10:"%Y-%m-%d-%H-%M-%S"' # rename by date modified (take note that if you copy photos that considered modifying them.)
+##### You must implement this immediately after loading the files off of the SD cards or at least before copying/modifying them.  
+ex <- '/EXECUTE' # start everything
+to_be_shelled <- paste("R","CMD",BRC_exe,DIR,nf,rec,rmv,date,ex, sep = " ")
+
+shell(to_be_shelled)
+
+```
+
+### Resize photos
+
+The next step, and a combined one, is resizing/relocating your photos to the images folder within the working directory.
+
+#### Designating the location of your photos
+Photos are assummed to be collected and stored under site -> year
+Example: *D:/CameraProject/willscanyon/upland/WLU_05102019_06302019*
+
+```{r}
+# Multiple folders
+# prime_photo_folders <- "D:/CameraProject/willscanyon/upland/WLU_05102019_06302019/106EK113"
+prime_photo_folders <- ""
+# Single folder
+prime_photo_folders <- ""
+```
+
+#### Photo Integrity
+Before spending your valuable time resizing your photos, it's a best practice to check for corrupt photos. If a photo is corrupt it'll stop the resizing and you'll have to begin again. 
+
+```{r list photos}
+
+Photo_source <- list.files(prime_photo_folders, pattern = "2019",all.files = FALSE,
+                        full.names = T, recursive = FALSE, include.dirs = TRUE)# patten is set to 2019 but should be changed depending year
+image_list <- list.files(Photo_source, pattern=".JPG", all.files = FALSE,
+           full.names = T, recursive = TRUE, include.dirs = TRUE)
+```
+
+```{r corruption check}
+readJPEG2 <- purrr::safely(jpeg::readJPEG)
+
+PhotoCheck <- function(x) {
+  for(i in 1:length(x)) {
+    if(!isTRUE(is.null(readJPEG2(x[i])$error))){
+     print(x[i])
+      return(x[i])
+    }
+  }
+}
+
+Corrupt <- PhotoCheck(Photo_source)
+```
+
+If the output says corrupt, you need to dig through your photos, note the photo that's corrupt in your folder README and delete the photo. 
+Re-run the *Photo_source* Script and check again before moving on. 
+
+#### Run install once, then comment out (ctrl+shift+C)
+```{r, echo=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("EBImage")
+```
+
+```{r resize}
+library(EBImage)
+
+
+readImage2 <- purrr::safely()
+
+
+Photo_size <- 256 # Size affects the processing time for classification and training. 
+
+for (i in 1:length(image_list)) {
+  imagetosize <- readImage(image_list[i])
+  resizedimages<- resize(imagetosize, w = Photo_size, h = Photo_size)
+  finalphotopath <- paste(getwd(), "images", basename(image_list[i]), sep = "/")
+  writeImage(x = resizedimages, files = finalphotopath, quality = 100)
+}
+
+# possible error if photo is corrupt or missing information
+# need to develop a check to locate, note and remove photos 
+
+```
+# building the Image_files.csv. This is list of file names, and the score you've given each photo. In this case the score is associate with whether the photo is occupied or not. If you have photos that have already been identified assign the path of the photos to *Sorted_photos*.
+
+```{r image_labels}
+
+prime_photo_folders<- paste(getwd(),"/images", sep = "")
+sorted_photos <- "C:/Users/brand/Documents/MLWIC/MLWIC_unmediated/sorted_images"
+# List out photos and store as a dataframe
+photo_folders <- as.data.frame(list.files(prime_photo_folders, pattern = "2019",all.files = FALSE,
+                                          full.names = F, recursive = FALSE, include.dirs = TRUE))
+
+sorted_photos <- as.data.frame(list.files(sorted_photos, pattern = "2019",all.files = FALSE,
+                                          full.names = F, recursive = FALSE, include.dirs = TRUE)) 
+## see similar files exist and if it matcches total in the to-be merged csv 
+colnames(photo_folders) <- c("ImageFilename")
+colnames(sorted_photos) <- c("ImageFilename")
+sorted_photos$value <- 1
+
+length(intersect(photo_folders,sorted_photos))
+
+## INNER JOIN: returns rows when there is a match in both tables.
+df3<- merge(photo_folders, sorted_photos, by ="ImageFilename", all=TRUE)
+
+
+## Remove NAs and add 0s in ImageID column
+df3[is.na(df3)] <- 0
+
+colnames(df3) <- c()
+# Write the first data set in a new workbook
+write.csv(df3, file = "image_labels.csv", row.names = F)
+```
+
+# MLWIC2 SETUP
+WOW we made it. Now that we have all of the prerequisites situated we can load in the actual package. 
+
+```{r install-MLWIC}
+devtools::install_github("mikeyEcology/MLWIC2")
+```
+
+```{r load-MLWIC}
+library(MLWIC2)
+```
+
+```{r run-setup}
+#setup(python_loc = "C:/Users/brand/Anaconda3/python.exe")
+setup(python_loc = condapath)
+```
+
+You have successfully prepared your computer to run the MLWIC2. In the next segment we'll run Classification, test for precision, and examine training if the default models fail to fulfill precisions thresholds.  
+
